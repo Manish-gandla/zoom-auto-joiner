@@ -1,0 +1,108 @@
+name: Zoom Meeting Auto-Joiner
+
+on:
+  # Manual trigger via GitHub UI
+  workflow_dispatch:
+    inputs:
+      meeting_link:
+        description: 'Zoom Meeting Link'
+        required: true
+        default: 'https://bytexl-in.zoom.us/meeting/register/PW9oV6oCQ7mG4d1zmLyR7w'
+        type: string
+      display_name:
+        description: 'Display Name in Meeting'
+        required: true
+        default: 'Meeting Bot'
+        type: string
+      duration_minutes:
+        description: 'Duration to stay in meeting (minutes)'
+        required: true
+        default: 60
+        type: number
+  # Schedule trigger - uncomment and adjust as needed
+  # schedule:
+  #   - cron: '0 9 * * 1-5'  # 9:00 AM Mon-Fri
+
+jobs:
+  join-zoom-meeting:
+    runs-on: ubuntu-latest
+    
+    # Timeout prevents the job from running forever
+    # Set this to your desired max meeting duration + buffer
+    timeout-minutes: 180
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            wget \
+            gnupg \
+            unzip \
+            xvfb \
+            libxi6 \
+            libgconf-2-4 \
+            libnss3 \
+            libxss1 \
+            libappindicator1 \
+            libindicator7 \
+            fonts-liberation \
+            libasound2 \
+            libatk-bridge2.0-0 \
+            libgtk-3-0 \
+            libx11-xcb1 \
+            libxcb-dri3-0 \
+            libdrm2 \
+            libgbm1 \
+            libxkbcommon0 \
+            libxcomposite1 \
+            libxdamage1 \
+            libxrandr2 \
+            libpango-1.0-0 \
+            libcairo2
+      
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+          google-chrome --version
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium requests
+      
+      - name: Run Zoom Meeting Joiner
+        env:
+          ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link || 'https://bytexl-in.zoom.us/meeting/register/PW9oV6oCQ7mG4d1zmLyR7w' }}
+          ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
+          SESSION_DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || 60 }}
+        run: |
+          python join_zoom.py &
+          BOT_PID=$!
+          echo "Bot started with PID: $BOT_PID"
+          
+          # Wait for the bot to confirm it joined
+          sleep 30
+          
+          # Keep the action running - don't kill the bot
+          # The bot script has its own infinite loop
+          wait $BOT_PID
+      
+      - name: Upload screenshots (on success or failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zoom-screenshots
+          path: /tmp/screenshots/
+          retention-days: 7
