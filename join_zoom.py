@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Zoom Meeting Auto-Joiner - You navigate the bot first, then it stays
+Uses webdriver-manager for automatic ChromeDriver version matching
 """
 
 import os
@@ -13,6 +14,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 # --- CONFIGURATION ---
 MEETING_LINK = os.environ.get("ZOOM_MEETING_LINK", "https://bytexl-in.zoom.us/meeting/register/PW9oV6oCQ7mG4d1zmLyR7w")
@@ -24,8 +27,10 @@ os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
 
 def setup_driver():
-    """Configure Chrome driver for headless Zoom"""
+    """Configure Chrome driver with automatic ChromeDriver management"""
     print("[*] Setting up Chrome driver...")
+    print("[*] Auto-detecting Chrome version and downloading matching ChromeDriver...")
+    
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
@@ -33,11 +38,11 @@ def setup_driver():
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+    options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    # Disable notifications and microphone/camera prompts
+    # Disable notifications and media prompts
     prefs = {
         "profile.default_content_setting_values.notifications": 2,
         "profile.default_content_setting_values.media_stream_mic": 1,
@@ -45,8 +50,13 @@ def setup_driver():
     }
     options.add_experimental_option("prefs", prefs)
 
-    driver = webdriver.Chrome(options=options)
+    # Use webdriver-manager to get the correct ChromeDriver version
+    service = Service(ChromeDriverManager().install())
+    
+    driver = webdriver.Chrome(service=service, options=options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
+    print(f"[+] Chrome started successfully with matching ChromeDriver")
     return driver
 
 
@@ -126,7 +136,6 @@ def wait_for_user_to_join(driver):
 
     if not joined:
         print("[*] No join button found - trying direct URL navigation...")
-        # Sometimes Zoom redirects - let's follow
         current_url = driver.current_url
         if "zoom.us/j/" in current_url or "zoom.us/wc/" in current_url:
             print("[+] Already navigated to meeting room")
@@ -226,20 +235,17 @@ def stay_in_meeting(driver):
 
             if not leave_buttons:
                 print("[!] WARNING: Leave button not found - might have disconnected")
-                # Try refreshing the connection
                 print("[*] Attempting to rejoin...")
                 driver.get(MEETING_LINK)
                 time.sleep(15)
                 take_screenshot(driver, f"reconnect_{cycle}")
             else:
-                # Still connected - good
                 if cycle % 5 == 0:
                     take_screenshot(driver, f"heartbeat_{cycle}")
 
         except Exception as e:
             print(f"[!] Connection check error: {e}")
 
-        # Wait 60 seconds between checks
         time.sleep(60)
 
     print(f"\n[✓] Session complete! Bot stayed for {SESSION_DURATION_MINUTES} minutes.")
@@ -255,10 +261,7 @@ def main():
     driver = setup_driver()
 
     try:
-        # Phase 1: Bot joins, you verify
         wait_for_user_to_join(driver)
-
-        # Phase 2: Bot stays while you exit
         stay_in_meeting(driver)
 
     except KeyboardInterrupt:
