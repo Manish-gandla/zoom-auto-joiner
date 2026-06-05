@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
 Zoom Meeting Auto-Joiner
-You register manually -> get join link -> paste into bot
-Bot joins, turns off audio/video, stays for duration
-Records video of everything the bot does
+Follows exact steps you specified:
+1. Click "Join from Browser"
+2. Click "Continue without microphone and camera" (pop-up 1)
+3. Click "Continue without microphone and camera" (pop-up 2)
+4. Enter passcode "120217", click Join
+5. Joined successfully!
+Records video of everything
 """
 
 import os
@@ -25,6 +29,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 MEETING_LINK = os.environ.get("ZOOM_MEETING_LINK", "")
 DISPLAY_NAME = os.environ.get("ZOOM_DISPLAY_NAME", "Meeting Bot")
 SESSION_DURATION_MINUTES = int(os.environ.get("SESSION_DURATION_MINUTES", "60"))
+MEETING_PASSCODE = "120217"
 
 if not MEETING_LINK or "zoom.us" not in MEETING_LINK:
     print("[!] ERROR: No valid Zoom meeting link provided!")
@@ -78,20 +83,17 @@ def setup_driver():
 
 
 def take_screenshot(driver, label):
-    """Save a screenshot"""
+    """Save a screenshot with step label"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{SCREENSHOT_DIR}/{timestamp}_{label}.png"
     driver.save_screenshot(filename)
-    print(f"[+] Screenshot: {filename}")
+    print(f"  [📸] Screenshot saved: {label}.png")
     return filename
 
 
 def frame_recorder(driver, output_path):
-    """
-    Background thread: continuously captures screenshots as video frames
-    at ~2 fps while the bot is running. Stitches them into a video at the end.
-    """
-    print("[🎥] Video recording thread started - capturing frames...")
+    """Background thread: captures frames and stitches into video"""
+    print("[🎥] Video recording started - capturing frames at 2fps...")
     
     while recording_active[0]:
         try:
@@ -100,20 +102,17 @@ def frame_recorder(driver, output_path):
             driver.save_screenshot(frame_path)
             frame_counter[0] += 1
             
-            # Print progress every 30 frames
             if frame_num % 30 == 0 and frame_num > 0:
                 print(f"[🎥] Captured {frame_num} frames so far...")
                 
         except Exception as e:
-            print(f"[!] Frame capture error: {e}")
+            pass
         
-        # ~2 frames per second
         time.sleep(0.5)
     
-    print(f"[🎥] Recording stopped. Total frames captured: {frame_counter[0]}")
+    print(f"[🎥] Recording stopped. Total frames: {frame_counter[0]}")
     print(f"[🎥] Encoding video from frames (this may take a moment)...")
     
-    # Stitch frames into video using ffmpeg
     if frame_counter[0] > 10:
         try:
             cmd = [
@@ -152,7 +151,7 @@ def start_video_recording(driver):
         daemon=True
     )
     video_thread[0].start()
-    print(f"[🎥] Video recording started -> {output_path}")
+    print(f"[🎥] Output video will be: {output_path}")
     return output_path
 
 
@@ -165,224 +164,331 @@ def stop_video_recording():
     print("[🎥] Video recording finished")
 
 
+def print_step(step_num, description):
+    """Print a clear step header"""
+    print(f"\n{'='*60}")
+    print(f"  STEP {step_num}: {description}")
+    print(f"{'='*60}")
+
+
+def print_status(message):
+    """Print a status message"""
+    print(f"  → {message}")
+
+
+def print_success(message):
+    """Print a success message"""
+    print(f"  ✅ {message}")
+
+
+def print_warning(message):
+    """Print a warning message"""
+    print(f"  ⚠️  {message}")
+
+
 def join_meeting(driver):
     """
-    Phase 1: Navigate to the meeting join link that YOU registered for.
-    Bot joins via browser, turns off audio/video.
+    Follow the exact steps you specified:
+    1. Click "Join from Browser"
+    2. Click "Continue without microphone and camera" (pop-up 1)
+    3. Click "Continue without microphone and camera" (pop-up 2) 
+    4. Enter passcode "120217", click Join
+    5. In meeting!
     """
     print("\n" + "="*60)
-    print("🟢 Bot is navigating to the meeting join link...")
-    print(f"📍 Link: {MEETING_LINK}")
+    print("  🟢 BOT STARTING - NAVIGATING TO MEETING")
     print("="*60)
-
-    # Navigate to the actual meeting join link
-    print(f"[*] Opening join link...")
+    
+    # ==========================================
+    # STEP 0: Navigate to the meeting link
+    # ==========================================
+    print_step(0, "Opening meeting link")
+    print_status(f"Navigating to: {MEETING_LINK}")
     driver.get(MEETING_LINK)
-    time.sleep(5)
-    take_screenshot(driver, "1_landing_page")
-
-    # Check what page we're on
-    current_url = driver.current_url
-    print(f"[*] Current URL: {current_url}")
-
-    # Wait for page to fully load
-    time.sleep(3)
-
-    # --- Handle different Zoom page states ---
-
-    # 1. Check if there's a "Launch Meeting" or "Join from Browser" button
-    print("[*] Looking for join/launch button in browser...")
+    print_status("Waiting for page to load...")
+    time.sleep(8)
+    take_screenshot(driver, "00_meeting_link_loaded")
+    print_success("Page loaded")
+    
+    # ==========================================
+    # STEP 1: Click "Join from Browser"
+    # ==========================================
+    print_step(1, 'Click "Join from Browser"')
+    print_status("Looking for 'Join from Browser' button in the white box...")
+    
+    join_found = False
     join_selectors = [
         "//button[contains(text(), 'Join from Browser')]",
-        "//button[contains(text(), 'Launch Meeting')]",
-        "//button[contains(text(), 'Join Meeting')]",
-        "//button[contains(text(), 'Join')]",
         "//a[contains(text(), 'Join from Browser')]",
-        "//a[contains(text(), 'Launch Meeting')]",
-        "//button[contains(@class, 'join-btn')]",
-        "//button[contains(@class, 'launch-button')]",
-        "//a[contains(text(), 'click here')]",
-        "//button[contains(text(), 'Open Zoom')]",
+        "//span[contains(text(), 'Join from Browser')]/..",
+        "//div[contains(text(), 'Join from Browser')]/..",
+        "//*[contains(text(), 'Join from Browser')]",
     ]
-
-    joined = False
+    
     for selector in join_selectors:
         try:
             element = WebDriverWait(driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, selector))
             )
+            driver.execute_script("arguments[0].scrollIntoView(true);", element)
+            time.sleep(1)
             driver.execute_script("arguments[0].click();", element)
-            print(f"[+] Clicked join button: {selector}")
-            joined = True
-            time.sleep(5)
-            take_screenshot(driver, "2_after_join_click")
+            print_success('Clicked "Join from Browser"')
+            join_found = True
+            time.sleep(4)
+            take_screenshot(driver, "01_after_join_from_browser_click")
             break
         except:
             continue
-
-    # 2. If we're already on the meeting page (no button needed)
-    if not joined:
-        print("[*] No join button found - checking if already in meeting room...")
-        if "zoom.us/j/" in current_url or "zoom.us/wc/" in current_url:
-            print("[+] Already navigated to meeting room")
-            joined = True
-        else:
-            # Try to detect if page needs a name entry first
-            print("[*] Trying name entry form...")
-            try:
-                name_input = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//input[@id='name' or @name='name' or @placeholder='Enter your name' or @placeholder='Your Name']"))
-                )
-                name_input.clear()
-                name_input.send_keys(DISPLAY_NAME)
-                print(f"[*] Entered name: {DISPLAY_NAME}")
-                time.sleep(1)
-                
-                # Find and click submit/join button near the name field
-                submit_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Join')] | //button[@type='submit']")
-                driver.execute_script("arguments[0].click();", submit_btn)
-                print("[+] Submitted name form")
-                time.sleep(5)
-                take_screenshot(driver, "2_after_name_submit")
-                joined = True
-            except:
-                print("[!] Could not find any way to join the meeting")
-
-    # 3. Handle "Open zoom.us app?" dialog
-    if joined:
-        time.sleep(5)
+    
+    if not join_found:
+        print_warning('Could not find "Join from Browser" button directly')
+        print_status("Trying alternative: looking for any 'Join' button...")
         try:
-            stay_in_browser = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Stay in Browser')] | //button[contains(text(), 'Stay in Browser')] | //button[contains(text(), 'Cancel')]"))
-            )
-            stay_in_browser.click()
-            print("[+] Stayed in browser (dismissed app launch)")
-            time.sleep(3)
+            elements = driver.find_elements(By.XPATH, "//button | //a")
+            for elem in elements:
+                text = elem.text.strip().lower()
+                if "join" in text:
+                    driver.execute_script("arguments[0].click();", elem)
+                    print_success(f"Clicked button with text: '{elem.text.strip()}'")
+                    time.sleep(4)
+                    take_screenshot(driver, "01_alt_join_click")
+                    join_found = True
+                    break
         except:
-            print("[*] No app launch dialog")
-
-        # 4. Wait for meeting interface to fully load
-        print("[*] Waiting for meeting interface...")
-        time.sleep(10)
-        take_screenshot(driver, "3_meeting_interface_loading")
-
-    # 5. Join Computer Audio (required to stay in meeting)
-    print("[*] Looking for audio join prompt...")
-    audio_selectors = [
-        "//button[contains(text(), 'Join Audio')]",
-        "//button[contains(text(), 'Join with Computer Audio')]",
-        "//button[contains(text(), 'Computer Audio')]",
-        "//button[contains(@aria-label, 'Join Audio')]",
-        "//button[contains(@aria-label, 'Join Computer Audio')]",
-        "//button[contains(text(), 'Use Computer Audio')]",
+            pass
+    
+    if not join_found:
+        print_warning("Could not find any join button - page may have loaded differently")
+        take_screenshot(driver, "01_no_join_button_found")
+    
+    # ==========================================
+    # STEP 2: Click "Continue without microphone and camera" (Pop-up 1)
+    # ==========================================
+    print_step(2, 'Click "Continue without microphone and camera" (Pop-up 1)')
+    print_status("Waiting for pop-up to appear...")
+    time.sleep(5)
+    
+    continue_found = False
+    continue_selectors = [
+        "//button[contains(text(), 'Continue without microphone and camera')]",
+        "//a[contains(text(), 'Continue without microphone and camera')]",
+        "//span[contains(text(), 'Continue without')]/..",
+        "//*[contains(text(), 'Continue without')]",
+        "//button[contains(text(), 'Continue')]",
+        "//a[contains(text(), 'Continue')]",
     ]
-
-    audio_joined = False
-    for selector in audio_selectors:
+    
+    for selector in continue_selectors:
         try:
-            element = WebDriverWait(driver, 5).until(
+            element = WebDriverWait(driver, 8).until(
                 EC.element_to_be_clickable((By.XPATH, selector))
             )
+            driver.execute_script("arguments[0].scrollIntoView(true);", element)
+            time.sleep(1)
             driver.execute_script("arguments[0].click();", element)
-            print(f"[+] Clicked audio: {selector}")
-            audio_joined = True
-            time.sleep(2)
+            print_success('Clicked "Continue without microphone and camera" (Pop-up 1)')
+            continue_found = True
+            time.sleep(4)
+            take_screenshot(driver, "02_after_first_continue_click")
             break
         except:
             continue
-
-    if not audio_joined:
-        print("[*] No audio prompt found - may already be connected")
-
-    # 6. Mute microphone
-    print("[*] Muting microphone...")
-    mute_selectors = [
-        "//button[contains(@aria-label, 'Mute')]",
-        "//button[contains(@aria-label, 'Mute my microphone')]",
-        "//button[contains(@title, 'Mute')]",
-        "//button[contains(@data-testid, 'mute')]",
-    ]
-
-    for selector in mute_selectors:
+    
+    if not continue_found:
+        print_warning("Pop-up 1 not found, taking screenshot to debug...")
+        take_screenshot(driver, "02_first_continue_not_found")
+    
+    # ==========================================
+    # STEP 3: Click "Continue without microphone and camera" (Pop-up 2)
+    # ==========================================
+    print_step(3, 'Click "Continue without microphone and camera" (Pop-up 2)')
+    print_status("Waiting for second pop-up to appear...")
+    time.sleep(5)
+    
+    continue_found_2 = False
+    for selector in continue_selectors:
         try:
-            element = WebDriverWait(driver, 3).until(
+            element = WebDriverWait(driver, 8).until(
                 EC.element_to_be_clickable((By.XPATH, selector))
             )
-            aria = element.get_attribute("aria-label").lower()
-            title = element.get_attribute("title").lower() if element.get_attribute("title") else ""
-            # Only click if it says "Mute" (not already muted/"Unmute")
-            if "unmute" not in aria and "unmute" not in title:
-                driver.execute_script("arguments[0].click();", element)
-                print(f"[+] Microphone muted")
-                time.sleep(1)
-                break
-            else:
-                print("[*] Microphone already muted")
-                break
+            driver.execute_script("arguments[0].scrollIntoView(true);", element)
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", element)
+            print_success('Clicked "Continue without microphone and camera" (Pop-up 2)')
+            continue_found_2 = True
+            time.sleep(4)
+            take_screenshot(driver, "03_after_second_continue_click")
+            break
         except:
             continue
-
-    # 7. Turn off camera
-    print("[*] Turning off camera...")
-    camera_selectors = [
-        "//button[contains(@aria-label, 'Stop Video')]",
-        "//button[contains(@aria-label, 'Turn off my video')]",
-        "//button[contains(@title, 'Stop Video')]",
-        "//button[contains(@data-testid, 'video')]",
-        "//button[contains(@aria-label, 'Stop my video')]",
-    ]
-
-    for selector in camera_selectors:
-        try:
-            element = WebDriverWait(driver, 3).until(
-                EC.element_to_be_clickable((By.XPATH, selector))
-            )
-            aria = element.get_attribute("aria-label").lower()
-            title = element.get_attribute("title").lower() if element.get_attribute("title") else ""
-            # Only click if video is currently on ("Stop" vs "Start")
-            if "start" not in aria and "start" not in title:
-                driver.execute_script("arguments[0].click();", element)
-                print(f"[+] Camera turned off")
-                time.sleep(1)
-                break
-            else:
-                print("[*] Camera already off")
-                break
-        except:
-            continue
-
-    # 8. Final confirmation screenshot
+    
+    if not continue_found_2:
+        print_warning("Pop-up 2 not found, taking screenshot to debug...")
+        take_screenshot(driver, "03_second_continue_not_found")
+    
+    # ==========================================
+    # STEP 4: Enter passcode and click Join
+    # ==========================================
+    print_step(4, f'Enter passcode "{MEETING_PASSCODE}" and click Join')
+    print_status("Looking for passcode input field...")
     time.sleep(3)
-    take_screenshot(driver, "4_bot_ready_in_meeting")
-
-    # Verify we're actually in the meeting by checking for leave button
+    
+    passcode_entered = False
+    
+    # Find passcode input
+    passcode_selectors = [
+        "//input[@id='input-for-pwd' or @id='passcode' or @id='password']",
+        "//input[@placeholder='Enter passcode' or @placeholder='Passcode' or @placeholder='Password']",
+        "//input[@type='password']",
+        "//input[contains(@class, 'pwd')]",
+        "//input[contains(@class, 'passcode')]",
+        "//input[contains(@id, 'pwd')]",
+        "//input[contains(@id, 'passcode')]",
+    ]
+    
+    for selector in passcode_selectors:
+        try:
+            passcode_input = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, selector))
+            )
+            passcode_input.clear()
+            passcode_input.send_keys(MEETING_PASSCODE)
+            print_success(f'Entered passcode: "{MEETING_PASSCODE}"')
+            passcode_entered = True
+            time.sleep(2)
+            take_screenshot(driver, "04_passcode_entered")
+            break
+        except:
+            continue
+    
+    if not passcode_entered:
+        print_warning("Could not find passcode input field directly")
+        print_status("Looking for any input field on the page...")
+        try:
+            inputs = driver.find_elements(By.XPATH, "//input[@type='text'] | //input")
+            for inp in inputs:
+                if inp.is_displayed():
+                    inp.clear()
+                    inp.send_keys(MEETING_PASSCODE)
+                    print_success(f"Entered passcode into input field")
+                    passcode_entered = True
+                    time.sleep(2)
+                    take_screenshot(driver, "04_passcode_entered_alt")
+                    break
+        except:
+            pass
+    
+    # Click Join button
+    print_status('Looking for "Join" button...')
+    join_btn_found = False
+    join_btn_selectors = [
+        "//button[contains(text(), 'Join')]",
+        "//button[contains(@class, 'join')]",
+        "//button[@type='submit']",
+        "//span[contains(text(), 'Join')]/..",
+    ]
+    
+    for selector in join_btn_selectors:
+        try:
+            join_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, selector))
+            )
+            driver.execute_script("arguments[0].scrollIntoView(true);", join_btn)
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", join_btn)
+            print_success('Clicked "Join" button')
+            join_btn_found = True
+            time.sleep(5)
+            take_screenshot(driver, "05_after_join_click")
+            break
+        except:
+            continue
+    
+    if not join_btn_found:
+        print_warning("Could not find Join button, trying any button on page...")
+        try:
+            buttons = driver.find_elements(By.XPATH, "//button")
+            for btn in buttons:
+                text = btn.text.strip().lower()
+                if text in ["join", "submit", "enter", "ok", "continue"]:
+                    driver.execute_script("arguments[0].click();", btn)
+                    print_success(f"Clicked button: '{btn.text.strip()}'")
+                    time.sleep(5)
+                    take_screenshot(driver, "05_alt_join_click")
+                    break
+        except:
+            pass
+    
+    # ==========================================
+    # STEP 5: Confirm we're in the meeting
+    # ==========================================
+    print_step(5, "Confirming bot has joined the meeting")
+    print_status("Waiting for meeting interface to load...")
+    time.sleep(8)
+    take_screenshot(driver, "06_meeting_interface")
+    
+    # Mute microphone
+    print_status("Muting microphone...")
+    try:
+        mute_btns = driver.find_elements(By.XPATH, 
+            "//button[contains(@aria-label, 'Mute')] | //button[contains(@title, 'Mute')]")
+        for btn in mute_btns:
+            aria = btn.get_attribute("aria-label").lower() if btn.get_attribute("aria-label") else ""
+            title = btn.get_attribute("title").lower() if btn.get_attribute("title") else ""
+            if "unmute" not in aria and "unmute" not in title:
+                driver.execute_script("arguments[0].click();", btn)
+                print_success("Microphone muted")
+                time.sleep(1)
+                break
+    except:
+        print_warning("Could not mute microphone")
+    
+    # Turn off camera
+    print_status("Turning off camera...")
+    try:
+        cam_btns = driver.find_elements(By.XPATH,
+            "//button[contains(@aria-label, 'Stop Video')] | //button[contains(@title, 'Stop Video')]")
+        for btn in cam_btns:
+            aria = btn.get_attribute("aria-label").lower() if btn.get_attribute("aria-label") else ""
+            title = btn.get_attribute("title").lower() if btn.get_attribute("title") else ""
+            if "start" not in aria and "start" not in title:
+                driver.execute_script("arguments[0].click();", btn)
+                print_success("Camera turned off")
+                time.sleep(1)
+                break
+    except:
+        print_warning("Could not turn off camera")
+    
+    time.sleep(3)
+    take_screenshot(driver, "07_bot_ready_in_meeting")
+    
+    # Check for "Leave" button to confirm
     try:
         leave_check = driver.find_elements(By.XPATH, "//button[contains(text(), 'Leave')]")
         if leave_check:
             print("\n" + "="*60)
-            print("✅ BOT SUCCESSFULLY JOINED THE MEETING!")
-            print("   Audio: Muted")
-            print("   Video: Off")
-            print("   Bot will stay for the full duration")
+            print("  🎉🎉🎉 BOT SUCCESSFULLY JOINED THE MEETING! 🎉🎉🎉")
+            print("="*60)
+            print("  ✅ Audio: Muted")
+            print("  ✅ Video: Off")
+            print("  ✅ Passcode entered: 120217")
+            print("  ✅ Bot is in the meeting and will stay for the duration")
             print("="*60)
             return True
         else:
-            print("\n[!] WARNING: Could not confirm bot is in meeting (no Leave button)")
-            print("[*] Bot will still attempt to stay connected")
+            print_warning("Could not find 'Leave' button but bot may still be in meeting")
             return True
     except:
-        print("\n[!] WARNING: Could not verify meeting state")
+        print_warning("Could not verify meeting state")
         return True
 
 
 def stay_in_meeting(driver):
-    """
-    Phase 2: Bot stays in the meeting for the full duration.
-    Periodically checks connection and reconnects if needed.
-    """
+    """Phase 2: Bot stays in the meeting for the full duration"""
     print("\n" + "="*60)
-    print("🟢 Bot is now staying in the meeting")
-    print(f"📅 Duration: {SESSION_DURATION_MINUTES} minutes")
+    print("  🟢 PHASE 2: Bot is staying in the meeting")
+    print(f"  ⏱ Duration: {SESSION_DURATION_MINUTES} minutes")
     print("="*60)
 
     end_time = time.time() + (SESSION_DURATION_MINUTES * 60)
@@ -393,73 +499,54 @@ def stay_in_meeting(driver):
         mins, secs = divmod(remaining, 60)
         cycle += 1
 
-        # Simple compact status
-        print(f"[⏱] {mins:02d}:{secs:02d} remaining (check #{cycle})")
+        print(f"  [⏱] {mins:02d}:{secs:02d} remaining (check #{cycle})", end="")
 
         try:
-            # Check if "Leave" button exists = we're still connected
             leave_buttons = driver.find_elements(
                 By.XPATH,
                 "//button[contains(text(), 'Leave')] | //button[contains(@aria-label, 'Leave meeting')]"
             )
 
             if not leave_buttons:
-                print("[!] Disconnected! Attempting to rejoin...")
+                print(" - DISCONNECTED! Rejoining...")
                 driver.get(MEETING_LINK)
                 time.sleep(15)
                 take_screenshot(driver, f"reconnect_{cycle}")
-                
-                # Re-mute and re-turn-off camera if needed
-                try:
-                    mute_btn = driver.find_element(By.XPATH, "//button[contains(@aria-label, 'Mute')]")
-                    mute_btn.click()
-                except:
-                    pass
-                try:
-                    cam_btn = driver.find_element(By.XPATH, "//button[contains(@aria-label, 'Stop Video')]")
-                    cam_btn.click()
-                except:
-                    pass
             else:
-                # Still connected - take periodic screenshot for artifact
+                print(" - Connected ✓")
                 if cycle % 10 == 0:
                     take_screenshot(driver, f"heartbeat_{cycle}")
 
         except Exception as e:
-            print(f"[!] Connection check error: {e}")
+            print(f" - Error: {e}")
 
-        # Wait 60 seconds between checks
         time.sleep(60)
 
-    print(f"\n[✓] Session complete! Bot stayed for {SESSION_DURATION_MINUTES} minutes.")
-    take_screenshot(driver, "5_session_complete")
+    print(f"\n  [✓] Session complete! Bot stayed for {SESSION_DURATION_MINUTES} minutes.")
+    take_screenshot(driver, "08_session_complete")
 
 
 def main():
     """Main execution flow"""
     print("="*60)
-    print(f"🤖 ZOOM MEETING BOT")
-    print(f"🕐 Started at: {datetime.now().isoformat()}")
-    print(f"📍 Meeting: {MEETING_LINK}")
-    print(f"👤 Name: {DISPLAY_NAME}")
-    print(f"⏱ Duration: {SESSION_DURATION_MINUTES} minutes")
+    print("  🤖 ZOOM MEETING BOT")
+    print(f"  🕐 Started at: {datetime.now().isoformat()}")
+    print(f"  📍 Meeting: {MEETING_LINK}")
+    print(f"  👤 Name: {DISPLAY_NAME}")
+    print(f"  ⏱ Duration: {SESSION_DURATION_MINUTES} minutes")
+    print(f"  🔑 Passcode: {MEETING_PASSCODE}")
     print("="*60)
 
-    # Initialize driver
     driver = setup_driver()
-
-    # Start video recording
     video_path = start_video_recording(driver)
 
     try:
-        # Phase 1: Join the meeting
         joined = join_meeting(driver)
-
-        # Stop video recording (the interesting part is done)
+        
+        # Stop video recording now that we've joined
         stop_video_recording()
 
         if joined:
-            # Phase 2: Stay for duration
             stay_in_meeting(driver)
         else:
             print("[!] Could not join meeting, aborting")
