@@ -33,42 +33,24 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Chrome and dependencies
+      - name: Install Chrome
         run: |
           sudo apt-get update
-          # Install Chrome directly from .deb (handles deps automatically)
           wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
           google-chrome --version
-          
-          # Install additional tools needed for headless mode
-          sudo apt-get install -y \
-            xvfb \
-            libnss3 \
-            libnspr4 \
-            libatk1.0-0t64 \
-            libatk-bridge2.0-0t64 \
-            libcups2t64 \
-            libdrm2 \
-            libxkbcommon0 \
-            libxcomposite1 \
-            libxdamage1 \
-            libxfixes3 \
-            libxrandr2 \
-            libgbm1 \
-            libasound2t64 \
-            libpango-1.0-0 \
-            libcairo2 \
-            fonts-liberation \
-            libu2f-udev \
-            libvulkan1
+
+      - name: Remove pre-installed chromedriver (prevents version mismatch)
+        run: |
+          sudo rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver
+          which chromedriver && echo "WARNING: chromedriver still exists" || echo "OK: chromedriver removed"
 
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium requests
+          pip install selenium requests webdriver-manager
 
-      - name: Run Zoom Meeting Joiner (stay indefinitely)
+      - name: Run Zoom Meeting Joiner
         env:
           ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link || 'https://bytexl-in.zoom.us/meeting/register/PW9oV6oCQ7mG4d1zmLyR7w' }}
           ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
@@ -77,8 +59,6 @@ jobs:
           echo "=== Starting Zoom Bot ==="
           echo "Meeting: $ZOOM_MEETING_LINK"
           echo "Duration: $SESSION_DURATION_MINUTES minutes"
-          echo ""
-          echo "🟢 Bot is launching Chrome and navigating to the meeting..."
           python join_zoom.py
 
       - name: Upload screenshots
