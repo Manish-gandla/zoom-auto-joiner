@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       meeting_link:
-        description: 'Zoom Meeting Join Link (after you register manually)'
+        description: 'Zoom Meeting Join Link'
         required: true
-        default: 'https://bytexl-in.zoom.us/j/1234567890'
         type: string
       display_name:
         description: 'Display Name in Meeting'
@@ -46,10 +45,9 @@ jobs:
           sudo apt-get install -y ffmpeg || sudo apt-get install -y ffmpeg --fix-missing
           ffmpeg -version | head -1
 
-      - name: Remove pre-installed chromedriver (prevents version mismatch)
+      - name: Remove pre-installed chromedriver
         run: |
           sudo rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver /opt/hostedtoolcache/*/chromedriver
-          echo "Checking chromedriver is gone..."
           which chromedriver && echo "WARNING: still exists" || echo "OK: removed"
 
       - name: Install Python dependencies
@@ -57,15 +55,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium requests webdriver-manager
 
-      - name: Run Zoom Meeting Joiner
+      - name: Run Zoom Meeting Joiner (Fully Automatic)
         env:
           ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link }}
           ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
           SESSION_DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || 60 }}
         run: |
-          echo "=== Starting Zoom Bot ==="
-          echo "Meeting: $ZOOM_MEETING_LINK"
-          echo "Duration: $SESSION_DURATION_MINUTES minutes"
+          echo "=== Zoom Bot Started ==="
+          echo "Bot will automatically:"
+          echo "  1. Open the meeting link"
+          echo "  2. Click 'Join from Browser'"
+          echo "  3. Dismiss permission prompts"
+          echo "  4. Enter passcode 120217 if needed"
+          echo "  5. Mute audio and turn off camera"
+          echo "  6. Stay for the full duration"
+          echo ""
           python join_zoom.py
 
       - name: Upload screenshots
