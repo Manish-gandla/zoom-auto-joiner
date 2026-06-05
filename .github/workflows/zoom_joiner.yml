@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       meeting_link:
-        description: 'Zoom Meeting Link'
+        description: 'Zoom Meeting Join Link (after you register manually)'
         required: true
-        default: 'https://bytexl-in.zoom.us/meeting/register/PW9oV6oCQ7mG4d1zmLyR7w'
+        default: 'https://bytexl-in.zoom.us/j/1234567890'
         type: string
       display_name:
         description: 'Display Name in Meeting'
@@ -36,35 +36,4 @@ jobs:
       - name: Install Chrome
         run: |
           sudo apt-get update
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb
-          google-chrome --version
-
-      - name: Remove pre-installed chromedriver (prevents version mismatch)
-        run: |
-          sudo rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver
-          which chromedriver && echo "WARNING: chromedriver still exists" || echo "OK: chromedriver removed"
-
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium requests webdriver-manager
-
-      - name: Run Zoom Meeting Joiner
-        env:
-          ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link || 'https://bytexl-in.zoom.us/meeting/register/PW9oV6oCQ7mG4d1zmLyR7w' }}
-          ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
-          SESSION_DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || 60 }}
-        run: |
-          echo "=== Starting Zoom Bot ==="
-          echo "Meeting: $ZOOM_MEETING_LINK"
-          echo "Duration: $SESSION_DURATION_MINUTES minutes"
-          python join_zoom.py
-
-      - name: Upload screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: zoom-screenshots
-          path: /tmp/screenshots/
-          retention-days: 7
+          wget -q https://
