@@ -40,7 +40,7 @@ jobs:
             (sudo dpkg -i google-chrome-stable_current_amd64.deb && sudo apt-get install -f -y)
           google-chrome --version
 
-      - name: Install ffmpeg (for video encoding)
+      - name: Install ffmpeg
         run: |
           sudo apt-get install -y ffmpeg || sudo apt-get install -y ffmpeg --fix-missing
           ffmpeg -version | head -1
@@ -55,21 +55,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium requests webdriver-manager
 
-      - name: Run Zoom Meeting Joiner (Fully Automatic)
+      - name: Run Zoom Meeting Joiner
         env:
           ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link }}
           ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
           SESSION_DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || 60 }}
         run: |
           echo "=== Zoom Bot Started ==="
-          echo "Bot will automatically:"
-          echo "  1. Open the meeting link"
-          echo "  2. Click 'Join from Browser'"
-          echo "  3. Dismiss permission prompts"
-          echo "  4. Enter passcode 120217 if needed"
-          echo "  5. Mute audio and turn off camera"
-          echo "  6. Stay for the full duration"
-          echo ""
           python join_zoom.py
 
       - name: Upload screenshots
