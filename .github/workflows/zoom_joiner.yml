@@ -1,81 +1,155 @@
-name: Zoom Meeting Auto-Joiner
+name: Zoom Meeting Auto-Join with Recording
 
 on:
   workflow_dispatch:
     inputs:
-      meeting_link:
-        description: 'Zoom Meeting Join Link'
+      join_link:
+        description: 'Full Zoom join link (paste after registering)'
         required: true
         type: string
-      display_name:
-        description: 'Display Name in Meeting'
+      meeting_passcode:
+        description: 'Meeting passcode'
         required: true
-        default: 'Meeting Bot'
         type: string
-      duration_minutes:
-        description: 'Duration to stay in meeting (minutes)'
+        default: '120217'
+      duration_seconds:
+        description: 'Duration to stay in meeting (seconds)'
         required: true
-        default: 60
         type: number
+        default: 300
+      participant_name:
+        description: 'Display name in meeting'
+        required: false
+        type: string
+        default: 'HackerAI Bot'
 
 jobs:
-  join-zoom-meeting:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
+  join-zoom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      - name: Install Chrome
+      - name: Install system dependencies
         run: |
-          sudo apt-get update || true
-          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || \
-            (sudo dpkg -i google-chrome-stable_current_amd64.deb && sudo apt-get install -f -y)
-          google-chrome --version
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            chromium-browser \
+            chromium-chromedriver \
+            xvfb \
+            xdotool \
+            scrot \
+            ffmpeg \
+            python3-pip \
+            python3-venv \
+            dbus-x11 \
+            x11-utils \
+            x11-xserver-utils \
+            > /dev/null 2>&1
+          # Remove pre-installed chromedriver to avoid version conflicts
+          sudo apt-get remove -y chromium-chromedriver 2>/dev/null || true
+          echo "System dependencies installed"
 
-      - name: Install ffmpeg and xdotool
+      - name: Verify Chrome
         run: |
-          sudo apt-get install -y ffmpeg xdotool || sudo apt-get install -y ffmpeg xdotool --fix-missing
-          ffmpeg -version | head -1
+          which chromium-browser
+          chromium-browser --version
 
-      - name: Remove pre-installed chromedriver
+      - name: Setup Python virtual environment
         run: |
-          sudo rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver /opt/hostedtoolcache/*/chromedriver
-          which chromedriver && echo "WARNING: still exists" || echo "OK: removed"
+          python3 -m venv /tmp/zoom_env
+          source /tmp/zoom_env/bin/activate
+          pip install --quiet --upgrade pip
+          pip install --quiet selenium webdriver-manider pyautogui opencv-python-headless pillow
+          echo "Python dependencies installed"
 
-      - name: Install Python dependencies
+      - name: Start virtual display
         run: |
-          python -m pip install --upgrade pip
-          pip install selenium requests webdriver-manager pyautogui
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 2
+          echo "Virtual display started on :99"
+          export DISPLAY=:99
+          xdpyinfo -display :99 2>/dev/null | grep -E 'dimensions|depths' || echo "Display OK"
 
-      - name: Run Zoom Meeting Joiner
+      - name: Run Zoom Joiner Bot
         env:
-          ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link }}
-          ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
-          SESSION_DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || 60 }}
+          ZOOM_JOIN_LINK: ${{ inputs.join_link }}
+          MEETING_PASSCODE: ${{ inputs.meeting_passcode }}
+          DURATION_SECONDS: ${{ inputs.duration_seconds }}
+          PARTICIPANT_NAME: ${{ inputs.participant_name }}
+          DISPLAY: :99
         run: |
-          echo "=== Zoom Bot Started ==="
-          python join_zoom.py
+          source /tmp/zoom_env/bin/activate
+          mkdir -p /tmp/zoom_bot_output
+          
+          # Start recording in background
+          python3 -c "
+import subprocess, threading, time, os, signal
+output_dir = '/tmp/zoom_bot_output'
+fps_count = [0]
+running = [True]
 
-      - name: Upload screenshots
-        if: always()
+def record_screenshots():
+    while running[0]:
+        fname = os.path.join(output_dir, f'frame_{fps_count[0]:05d}.png')
+        subprocess.run(['scrot', fname], capture_output=True)
+        fps_count[0] += 1
+        time.sleep(0.5)
+
+t = threading.Thread(target=record_screenshots, daemon=True)
+t.start()
+print('Recording thread started')
+" &
+          RECORD_PID=$!
+          echo "Recording PID: $RECORD_PID"
+          
+          # Run the main script
+          python3 scripts/join_zoom.py
+          
+          # Stop recording
+          sleep 2
+          kill $RECORD_PID 2>/dev/null || true
+          
+          echo "Bot execution completed"
+
+      - name: Generate video from screenshots
+        run: |
+          source /tmp/zoom_env/bin/activate
+          cd /tmp/zoom_bot_output
+          
+          FRAME_COUNT=$(ls frame_*.png 2>/dev/null | wc -l)
+          echo "Captured $FRAME_COUNT frames"
+          
+          if [ "$FRAME_COUNT" -gt 5 ]; then
+            # Create video at 2fps
+            ffmpeg -y -framerate 2 -pattern_type glob -i 'frame_*.png' \
+              -c:v libx264 -preset ultrafast -crf 28 \
+              -pix_fmt yuv420p \
+              /tmp/zoom_bot_video.mp4 2>/dev/null
+            echo "Video created: /tmp/zoom_bot_video.mp4"
+          else
+            echo "Not enough frames to create video"
+          fi
+
+      - name: Upload screenshots artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: zoom-screenshots
-          path: /tmp/screenshots/
+          path: /tmp/zoom_bot_output/
           retention-days: 7
 
-      - name: Upload video recording
-        if: always()
+      - name: Upload video artifact
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: zoom-bot-video
-          path: /tmp/videos/
+          path: /tmp/zoom_bot_video.mp4
           retention-days: 7
