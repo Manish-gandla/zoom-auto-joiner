@@ -1,27 +1,27 @@
-name: Zoom Meeting Auto-Join with Recording
+name: Zoom Meeting Auto-Join
 
 on:
   workflow_dispatch:
     inputs:
       join_link:
-        description: 'Full Zoom join link (paste after registering)'
+        description: "Full Zoom join link (paste after registering)"
         required: true
         type: string
       meeting_passcode:
-        description: 'Meeting passcode'
+        description: "Meeting passcode"
         required: true
         type: string
-        default: '120217'
+        default: "120217"
       duration_seconds:
-        description: 'Duration to stay in meeting (seconds)'
+        description: "Duration to stay in meeting (seconds)"
         required: true
         type: number
         default: 300
       participant_name:
-        description: 'Display name in meeting'
+        description: "Display name in meeting"
         required: false
         type: string
-        default: 'HackerAI Bot'
+        default: "HackerAI Bot"
 
 jobs:
   join-zoom:
@@ -35,27 +35,14 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            chromium-browser \
-            chromium-chromedriver \
-            xvfb \
-            xdotool \
-            scrot \
-            ffmpeg \
-            python3-pip \
-            python3-venv \
-            dbus-x11 \
-            x11-utils \
-            x11-xserver-utils \
-            > /dev/null 2>&1
-          # Remove pre-installed chromedriver to avoid version conflicts
+          sudo apt-get install -y -qq xvfb scrot ffmpeg chromium-browser chromium-chromedriver python3-pip python3-venv dbus-x11 x11-utils > /dev/null 2>&1
           sudo apt-get remove -y chromium-chromedriver 2>/dev/null || true
-          echo "System dependencies installed"
+          echo "DONE: System deps installed"
 
       - name: Verify Chrome
         run: |
@@ -67,16 +54,14 @@ jobs:
           python3 -m venv /tmp/zoom_env
           source /tmp/zoom_env/bin/activate
           pip install --quiet --upgrade pip
-          pip install --quiet selenium webdriver-manider pyautogui opencv-python-headless pillow
-          echo "Python dependencies installed"
+          pip install --quiet selenium webdriver-manager pyautogui opencv-python-headless pillow
+          echo "DONE: Python deps installed"
 
       - name: Start virtual display
         run: |
           Xvfb :99 -screen 0 1920x1080x24 &
           sleep 2
-          echo "Virtual display started on :99"
-          export DISPLAY=:99
-          xdpyinfo -display :99 2>/dev/null | grep -E 'dimensions|depths' || echo "Display OK"
+          echo "DONE: Display :99 started"
 
       - name: Run Zoom Joiner Bot
         env:
@@ -84,61 +69,50 @@ jobs:
           MEETING_PASSCODE: ${{ inputs.meeting_passcode }}
           DURATION_SECONDS: ${{ inputs.duration_seconds }}
           PARTICIPANT_NAME: ${{ inputs.participant_name }}
-          DISPLAY: :99
+          DISPLAY: ":99"
         run: |
           source /tmp/zoom_env/bin/activate
           mkdir -p /tmp/zoom_bot_output
-          
-          # Start recording in background
+
+          # Screenshot recording loop in background
           python3 -c "
-import subprocess, threading, time, os, signal
+import subprocess, threading, time, os
 output_dir = '/tmp/zoom_bot_output'
-fps_count = [0]
+counter = [0]
 running = [True]
-
-def record_screenshots():
+def record():
     while running[0]:
-        fname = os.path.join(output_dir, f'frame_{fps_count[0]:05d}.png')
+        fname = os.path.join(output_dir, f'frame_{counter[0]:05d}.png')
         subprocess.run(['scrot', fname], capture_output=True)
-        fps_count[0] += 1
+        counter[0] += 1
         time.sleep(0.5)
-
-t = threading.Thread(target=record_screenshots, daemon=True)
+t = threading.Thread(target=record, daemon=True)
 t.start()
 print('Recording thread started')
 " &
           RECORD_PID=$!
           echo "Recording PID: $RECORD_PID"
-          
-          # Run the main script
+
           python3 scripts/join_zoom.py
-          
-          # Stop recording
+
           sleep 2
           kill $RECORD_PID 2>/dev/null || true
-          
-          echo "Bot execution completed"
+          echo "DONE: Bot execution completed"
 
       - name: Generate video from screenshots
         run: |
           source /tmp/zoom_env/bin/activate
           cd /tmp/zoom_bot_output
-          
           FRAME_COUNT=$(ls frame_*.png 2>/dev/null | wc -l)
-          echo "Captured $FRAME_COUNT frames"
-          
+          echo "Frames captured: $FRAME_COUNT"
           if [ "$FRAME_COUNT" -gt 5 ]; then
-            # Create video at 2fps
-            ffmpeg -y -framerate 2 -pattern_type glob -i 'frame_*.png' \
-              -c:v libx264 -preset ultrafast -crf 28 \
-              -pix_fmt yuv420p \
-              /tmp/zoom_bot_video.mp4 2>/dev/null
-            echo "Video created: /tmp/zoom_bot_video.mp4"
+            ffmpeg -y -framerate 2 -pattern_type glob -i 'frame_*.png' -c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p /tmp/zoom_bot_video.mp4 2>/dev/null
+            echo "DONE: Video created"
           else
-            echo "Not enough frames to create video"
+            echo "Not enough frames for video"
           fi
 
-      - name: Upload screenshots artifact
+      - name: Upload screenshots
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -146,7 +120,7 @@ print('Recording thread started')
           path: /tmp/zoom_bot_output/
           retention-days: 7
 
-      - name: Upload video artifact
+      - name: Upload video
         uses: actions/upload-artifact@v4
         if: always()
         with:
