@@ -23,22 +23,11 @@ from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Try to import pyautogui
-try:
-    import pyautogui
-    PYATUOGUI_AVAILABLE = True
-except ImportError:
-    PYATUOGUI_AVAILABLE = False
-
 # --- CONFIGURATION ---
 MEETING_LINK = os.environ.get("ZOOM_MEETING_LINK", "")
 DISPLAY_NAME = os.environ.get("ZOOM_DISPLAY_NAME", "Meeting Bot")
 SESSION_DURATION_MINUTES = int(os.environ.get("SESSION_DURATION_MINUTES", "60"))
 MEETING_PASSCODE = "120217"
-
-# Coordinates for the blue "Join" button
-JOIN_BUTTON_X = 768
-JOIN_BUTTON_Y = 544
 
 if not MEETING_LINK or "zoom.us" not in MEETING_LINK:
     print("\n  [!!] ERROR: No valid Zoom meeting link provided!")
@@ -90,48 +79,6 @@ def print_fail(message):
 
 def print_info(message):
     print(f"    ℹ️  {message}")
-
-
-def click_at_coordinates(x, y, description="target"):
-    """Click at specific screen coordinates"""
-    print_action(f"Clicking at coordinates ({x}, {y}) - {description}")
-    
-    try:
-        if PYATUOGUI_AVAILABLE:
-            pyautogui.moveTo(x, y, duration=0.3)
-            time.sleep(0.3)
-            pyautogui.click(x, y)
-            print_ok(f"Clicked at ({x}, {y}) via pyautogui")
-            return True
-        else:
-            result = subprocess.run(
-                ["xdotool", "mousemove", str(x), str(y), "click", "1"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                print_ok(f"Clicked at ({x}, {y}) via xdotool")
-                return True
-            else:
-                print_warn(f"xdotool click failed")
-                return False
-    except Exception as e:
-        print_warn(f"Coordinate click error: {e}")
-        return False
-
-
-def bring_browser_to_front(driver):
-    """Bring browser window to focus"""
-    try:
-        driver.execute_script("window.focus();")
-        time.sleep(0.5)
-        subprocess.run(
-            ["xdotool", "search", "--name", "chrome", "windowfocus", "--sync"],
-            capture_output=True, timeout=3
-        )
-        time.sleep(0.5)
-        return True
-    except:
-        return False
 
 
 def setup_driver():
@@ -188,28 +135,20 @@ def frame_recorder(driver, output_path):
     print(f"\n  [🎥] VIDEO RECORDING THREAD STARTED - Capturing frames at 2fps")
     print(f"  [🎥] Output will be: {output_path}")
     
-    last_log_time = time.time()
-    
     while recording_active[0]:
         try:
             frame_num = frame_counter[0]
             frame_path = f"{FRAMES_DIR}/frame_{frame_num:06d}.png"
             
-            # Capture screenshot as frame
             driver.save_screenshot(frame_path)
             frame_counter[0] += 1
             
-            # Log progress every 60 frames (approx 30 seconds)
             if frame_num % 60 == 0 and frame_num > 0:
-                elapsed = time.time() - last_log_time
                 print(f"      [🎥] Captured {frame_num} frames so far...")
-                last_log_time = time.time()
                 
         except Exception as e:
-            # If screenshot fails, skip this frame
             pass
         
-        # ~2 frames per second
         time.sleep(0.5)
     
     # --- Recording stopped, now encode video ---
@@ -218,7 +157,6 @@ def frame_recorder(driver, output_path):
     
     if frame_counter[0] > 10:
         try:
-            # Use ffmpeg to stitch frames into MP4
             cmd = [
                 "ffmpeg", "-y",
                 "-framerate", "5",
@@ -237,11 +175,11 @@ def frame_recorder(driver, output_path):
                 print(f"  [✅] VIDEO ENCODED SUCCESSFULLY: {file_size_mb:.1f} MB")
                 print(f"  [✅] Saved to: {output_path}")
             else:
-                print(f"  [⚠️] ffmpeg stderr: {result.stderr[:300]}")
+                print(f"  [⚠️] ffmpeg error: {result.stderr[:300]}")
         except Exception as e:
             print(f"  [⚠️] Video encoding error: {e}")
     else:
-        print(f"  [⚠️] Not enough frames to create video ({frame_counter[0]} frames)")
+        print(f"  [⚠️] Not enough frames ({frame_counter[0]} frames)")
 
 
 def start_video_recording(driver):
@@ -261,9 +199,9 @@ def start_video_recording(driver):
     )
     video_thread[0].start()
     
-    print_ok("Video recording started - will capture everything from now")
+    print_ok("Video recording started - capturing everything from now")
     print_info(f"Output: bot_session_{timestamp}.mp4")
-    time.sleep(1)  # Give thread time to start
+    time.sleep(1)
     
     return output_path
 
@@ -297,7 +235,7 @@ def wait_and_click_selenium(driver, by, selector, description, timeout=6):
         driver.execute_script("arguments[0].scrollIntoView(true);", element)
         time.sleep(0.5)
         driver.execute_script("arguments[0].click();", element)
-        print_ok(f"Clicked via Selenium: {description}")
+        print_ok(f"Clicked: {description}")
         return True
     except:
         return False
@@ -338,7 +276,7 @@ def find_and_click_blue_join_button_selenium(driver, timeout_per_selector=3):
             time.sleep(0.5)
             driver.execute_script("arguments[0].click();", element)
             text_preview = (element.text or element.get_attribute("value") or selector)[:30]
-            print_ok(f"Clicked Join button via Selenium: '{text_preview}'")
+            print_ok(f"Clicked Join button: '{text_preview}'")
             return True
         except:
             continue
@@ -347,11 +285,10 @@ def find_and_click_blue_join_button_selenium(driver, timeout_per_selector=3):
 
 def click_blue_join_button_with_fallback(driver, max_attempts=5):
     """
-    Multi-strategy approach:
+    Multi-strategy approach using only Selenium/JavaScript (no pyautogui):
     1. Selenium selectors
     2. JavaScript search for blue buttons in middle of page
-    3. Coordinate clicking at (768, 544)
-    4. Scan all buttons
+    3. Scan all buttons
     """
     for attempt in range(1, max_attempts + 1):
         print_action(f"Looking for blue Join button (attempt {attempt}/{max_attempts})")
@@ -361,8 +298,8 @@ def click_blue_join_button_with_fallback(driver, max_attempts=5):
         if find_and_click_blue_join_button_selenium(driver, 3):
             return True
         
-        # Method 2: JavaScript search
-        print_action("Method 2: JavaScript search for blue buttons...")
+        # Method 2: JavaScript search for buttons in middle of page
+        print_action("Method 2: JavaScript search for buttons in center of page...")
         try:
             result = driver.execute_script("""
                 var elements = document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]');
@@ -375,79 +312,92 @@ def click_blue_join_button_with_fallback(driver, max_attempts=5):
                     if(text.indexOf('join') === -1) continue;
                     if(!el.offsetParent) continue;
                     
+                    var rect = el.getBoundingClientRect();
+                    
                     candidates.push({
                         index: i,
                         text: (el.textContent || el.value || '').trim().substring(0, 30),
                         tag: el.tagName,
                         id: el.id,
-                        rect: {
-                            top: el.getBoundingClientRect().top,
-                            left: el.getBoundingClientRect().left,
-                            width: el.getBoundingClientRect().width,
-                            height: el.getBoundingClientRect().height
-                        }
+                        midY: rect.top + rect.height/2,
+                        midX: rect.left + rect.width/2
                     });
                 }
                 
+                // Sort by proximity to center of viewport
                 candidates.sort(function(a, b) {
-                    var aMid = Math.abs(a.rect.top + a.rect.height/2 - window.innerHeight/2);
-                    var bMid = Math.abs(b.rect.top + b.rect.height/2 - window.innerHeight/2);
-                    return aMid - bMid;
+                    var aDist = Math.abs(a.midY - window.innerHeight/2) + Math.abs(a.midX - window.innerWidth/2);
+                    var bDist = Math.abs(b.midY - window.innerHeight/2) + Math.abs(b.midX - window.innerWidth/2);
+                    return aDist - bDist;
                 });
                 
-                return candidates.length > 0 ? candidates : [];
+                return candidates.length > 0 ? candidates.slice(0, 3) : [];
             """)
             
             if result and len(result) > 0:
-                print_info(f"Found {len(result)} candidates via JavaScript")
+                print_info(f"Found {len(result)} candidates near center of page")
+                for i, candidate in enumerate(result):
+                    print_info(f"  Candidate {i+1}: '{candidate['text']}' at ({candidate['midX']:.0f}, {candidate['midY']:.0f})")
+                
                 best = result[0]
-                print_info(f"Best match: '{best['text']}' at mid-page")
+                print_action(f"Clicking best candidate: '{best['text']}'...")
                 driver.execute_script("""
                     var elements = document.querySelectorAll('button, a, input[type="submit"], input[type="button"], [role="button"]');
                     if(elements[arguments[0]]) {
-                        elements[arguments[0]].scrollIntoView(true);
-                        setTimeout(function() { elements[arguments[0]].click(); }, 200);
+                        elements[arguments[0]].scrollIntoView({behavior: 'instant', block: 'center'});
+                        setTimeout(function() { elements[arguments[0]].click(); }, 300);
                     }
                 """, best['index'])
-                time.sleep(1)
+                time.sleep(2)
                 print_ok(f"Clicked via JavaScript: '{best['text']}'")
+                
+                # Check if it worked
+                time.sleep(3)
+                try:
+                    leave_btns = driver.find_elements(By.XPATH, "//button[contains(text(), 'Leave')]")
+                    if leave_btns:
+                        print_ok("Confirmed - bot entered the meeting!")
+                        return True
+                except:
+                    pass
+                
+                # If we got here, it might have worked but let's continue anyway
                 return True
             else:
                 print_skip("No candidates found via JavaScript")
         except Exception as e:
             print_warn(f"JS method error: {e}")
         
-        # Method 3: Coordinate click at (768, 544)
-        print_action(f"Method 3: Coordinate click at ({JOIN_BUTTON_X}, {JOIN_BUTTON_Y})...")
-        bring_browser_to_front(driver)
-        time.sleep(0.5)
-        if click_at_coordinates(JOIN_BUTTON_X, JOIN_BUTTON_Y, "blue Join button"):
-            time.sleep(2)
-            try:
-                leave_check = driver.find_elements(By.XPATH, "//button[contains(text(), 'Leave')]")
-                if leave_check:
-                    print_ok("Coordinate click worked - bot entered meeting!")
-                    return True
-                else:
-                    print_skip("Coordinate click done - may need retry")
-            except:
-                pass
-        
-        # Method 4: Scan all buttons
-        print_action("Method 4: Scanning all buttons...")
+        # Method 3: Scan all buttons on the page
+        print_action("Method 3: Scanning all buttons on page...")
         try:
             all_buttons = driver.find_elements(By.XPATH, "//button | //a | //input[@type='submit']")
+            print_info(f"Found {len(all_buttons)} clickable elements")
+            
+            # Try to find one that says "Join" and is visible
             for btn in all_buttons:
                 try:
                     text = (btn.text or "").strip()
-                    if "join" in text.lower() and btn.is_displayed():
+                    value = (btn.get_attribute("value") or "").strip()
+                    aria = (btn.get_attribute("aria-label") or "").strip()
+                    btn_id = (btn.get_attribute("id") or "").strip()
+                    
+                    combined = (text + " " + value + " " + aria + " " + btn_id).lower()
+                    
+                    if "join" in combined and btn.is_displayed():
+                        print_action(f"Found: text='{text[:20]}' id='{btn_id[:15]}'")
+                        driver.execute_script("arguments[0].scrollIntoView(true);", btn)
+                        time.sleep(0.5)
                         driver.execute_script("arguments[0].click();", btn)
-                        print_ok(f"Clicked button: '{text[:25]}'")
+                        print_ok(f"Clicked: '{text[:20] or value[:20]}'")
+                        time.sleep(3)
                         return True
                 except:
                     continue
-        except:
-            pass
+                    
+            print_skip("No suitable button found in scan")
+        except Exception as e:
+            print_warn(f"Button scan error: {e}")
         
         if attempt < max_attempts:
             print_skip(f"No method worked on attempt {attempt}, waiting and retrying...")
@@ -498,7 +448,6 @@ def join_meeting(driver):
     # STEP 2: Click "Join from Browser"
     print_step(2, TOTAL_STEPS, 'Finding and clicking "Join from Browser"')
     
-    print_action("Searching for 'Join from your browser' link/button")
     join_selectors = [
         "//button[contains(text(), 'Join from your browser')]",
         "//a[contains(text(), 'Join from your browser')]",
@@ -672,8 +621,8 @@ def join_meeting(driver):
             print_warn("JavaScript submit failed")
             take_screenshot(driver, "06_first_join_failed")
     
-    # STEP 7: SECOND blue Join button (final entry at coordinates 768, 544)
-    print_step(7, TOTAL_STEPS, f'Clicking BLUE "Join" button at ({JOIN_BUTTON_X}, {JOIN_BUTTON_Y})')
+    # STEP 7: SECOND blue Join button (final entry)
+    print_step(7, TOTAL_STEPS, 'Clicking the BLUE "Join" button (final entry into meeting)')
     print_info("This is the rectangular blue box with white text 'Join' in center of screen")
     print_action("Waiting for final join page to load...")
     time.sleep(8)
@@ -856,7 +805,6 @@ def main():
     print(f"  👤 Display Name: {DISPLAY_NAME}")
     print(f"  ⏱  Stay Duration: {SESSION_DURATION_MINUTES} min")
     print(f"  🔑 Passcode: {MEETING_PASSCODE}")
-    print(f"  🖱️  Blue Join Button: ({JOIN_BUTTON_X}, {JOIN_BUTTON_Y})")
     print(f"  🎥 Video will be recorded from START to JOIN")
     print(f"  🎯 Bot does EVERYTHING - just start and wait!")
     
