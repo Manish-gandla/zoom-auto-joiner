@@ -1,0 +1,81 @@
+name: Zoom Meeting Auto-Joiner
+
+on:
+  workflow_dispatch:
+    inputs:
+      meeting_link:
+        description: 'Zoom Meeting Join Link'
+        required: true
+        type: string
+      display_name:
+        description: 'Display Name in Meeting'
+        required: true
+        default: 'Meeting Bot'
+        type: string
+      duration_minutes:
+        description: 'Duration to stay in meeting (minutes)'
+        required: true
+        default: 60
+        type: number
+
+jobs:
+  join-zoom-meeting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chrome
+        run: |
+          sudo apt-get update || true
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || \
+            (sudo dpkg -i google-chrome-stable_current_amd64.deb && sudo apt-get install -f -y)
+          google-chrome --version
+
+      - name: Install ffmpeg and xdotool
+        run: |
+          sudo apt-get install -y ffmpeg xdotool || sudo apt-get install -y ffmpeg xdotool --fix-missing
+          ffmpeg -version | head -1
+
+      - name: Remove pre-installed chromedriver
+        run: |
+          sudo rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver /opt/hostedtoolcache/*/chromedriver
+          which chromedriver && echo "WARNING: still exists" || echo "OK: removed"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium requests webdriver-manager pyautogui
+
+      - name: Run Zoom Meeting Joiner
+        env:
+          ZOOM_MEETING_LINK: ${{ github.event.inputs.meeting_link }}
+          ZOOM_DISPLAY_NAME: ${{ github.event.inputs.display_name || 'Meeting Bot' }}
+          SESSION_DURATION_MINUTES: ${{ github.event.inputs.duration_minutes || 60 }}
+        run: |
+          echo "=== Zoom Bot Started ==="
+          python join_zoom.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zoom-screenshots
+          path: /tmp/screenshots/
+          retention-days: 7
+
+      - name: Upload video recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zoom-bot-video
+          path: /tmp/videos/
+          retention-days: 7
